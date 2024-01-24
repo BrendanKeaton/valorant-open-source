@@ -1,0 +1,189 @@
+---
+title: "Untitled"
+author: "Brendan Keaton"
+date: "2023-12-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(plyr)
+library(tidyverse)
+library(rpart)
+library(psych)
+library(pROC)
+#install.packages("rpart.plot")
+library(rpart.plot)
+#install.packages("rattle")
+library(rattle)
+library(ggplot2)
+library(tidyverse)
+library(gghighlight)
+library(geomtextpath)
+```
+
+```{r}
+# Fill in XXXXX with your own user, also make sure these files actually exist
+acs <- read_csv("C:/Users/XXXXX/Downloads/acs_december.csv")
+fb <- read_csv("C:/Users/XXXXX/Downloads/first_bloods_december.csv")
+fd <- read_csv("C:/Users/XXXXX/Downloads/first_deaths_december.csv")
+clutches <- read_csv("C:/XXXXX/brkea/Downloads/clutches_december.csv")
+KPR <- read_csv("C:/Users/XXXXX/Downloads/KPR_december.csv")
+
+first <- left_join(acs, fb, by=c("Ign", "Team"))
+second <- left_join(first, fd, by=c("Ign", "Team"))
+third <- left_join(second, clutches, by=c("Ign", "Team"))
+fourth <- left_join(third, KPR, by=c("Ign", "Team"))
+
+fourth$FBSR <- (fourth$Kills.x/(fourth$Deaths+fourth$Kills.x))*100
+fourth$clutchP <- (fourth$Clutches/(fourth$Clutches+fourth$`Clutch Failures`))*100
+
+allData <- fourth[which(fourth$Matches>=15),]
+allData <- allData[, c("Ign", "Rounds", "FBSR", "clutchP", "Kills Per Round", "Acs")]
+allData <- allData[-which(allData$Ign=="BORKUM"),]
+allData <- allData[-which(allData$Ign=="Monyet"),]
+
+allData <- allData %>% rename('KPR' = 'Kills Per Round')
+
+order.FBSR <- order(allData$FBSR, allData$Ign)
+allData$FBSR_order[order.FBSR] <- 1:nrow(allData)
+allData$FBSR_order <- max(allData$FBSR_order) - allData$FBSR_order + 1
+
+order.clutchP <- order(allData$clutchP, allData$Ign)
+allData$clutchP_order[order.clutchP] <- 1:nrow(allData)
+allData$clutchP_order <- max(allData$clutchP_order) - allData$clutchP_order + 1
+
+order.KPR <- order(allData$KPR, allData$Ign)
+allData$KPR_order[order.KPR] <- 1:nrow(allData)
+allData$KPR_order <- max(allData$KPR_order) - allData$KPR_order + 1
+
+order.Acs <- order(allData$Acs, allData$Ign)
+allData$Acs_order[order.Acs] <- 1:nrow(allData)
+allData$Acs_order <- max(allData$Acs_order) - allData$Acs_order + 1
+
+rm(acs, clutches, fb, fd, first, second, third, KPR, order.Acs, order.clutchP, order.KPR, order.FBSR) #fourth)
+allData <- allData[, c("Ign", "Acs_order", "KPR_order", "clutchP_order", "FBSR_order")]
+allData$start <- 72
+allData$finish <- 72
+#allData$avg <- (allData$Acs_order+allData$KPR_order+allData$clutchP_order+allData$FBSR_order)/4
+```
+
+
+```{r}
+library(tidyr) # pivot_longer
+test <- tidyr::pivot_longer(allData, c(`start`, `Acs_order`, `KPR_order`, `clutchP_order`, `FBSR_order`, `finish`), names_to = "year")
+ p <- ggplot(test, aes(year, value)) + geom_path(aes(color =Ign, group = Ign), linejoin = "round", linewidth = 1)+scale_x_discrete(limits = c("start", "Acs_order", "KPR_order", "clutchP_order", "FBSR_order", "finish"))+
+  theme(legend.position = "none",
+        panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_rect(fill='transparent'),
+        plot.background = element_rect(fill='transparent', color=NA),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.background = element_rect(fill='transparent'),
+        legend.box.background = element_rect(fill='transparent')
+        ) + scale_y_reverse() + 
+        gghighlight(Ign == "Jinggg" || Ign == "aspas" || Ign == "Demon1" || Ign == "Sayaplayer" || Ign == "Derke", unhighlighted_params = list(linewidth = 0.15,  colour = ggplot2::alpha("light gray", 0.3))) + 
+   scale_color_manual(values=c("#0aff00", "#000fc3", "#FF5900", "#d195b1", "#e2012d"))
+ 
+ ggsave('C:/Users/XXXXX/Downloads/test.png', p, bg='transparent', width = 12, height = 8, dpi = 900)
+ 
+ p
+```
+```{r}
+fourth$Team <- gsub(" (ex)", "", as.character(fourth$Team), fixed = TRUE)
+#allData_team_avg <- fourth %>% group_by(Team) %>% 
+#  summarise(across(everything(), mean),
+#            .groups = 'drop')  %>%
+#  as.data.frame()
+
+teams_fb <- fourth %>% group_by(Team) %>% 
+  summarise(across(Kills.x, sum),
+            .groups = 'drop')
+
+teams_fd <- fourth %>% group_by(Team) %>% 
+  summarise(across(Deaths, sum),
+            .groups = 'drop')
+
+teams_clutch_success <- fourth %>% group_by(Team) %>% 
+  summarise(across(Clutches, sum),
+            .groups = 'drop')
+
+teams_clutch_fail <- fourth %>% group_by(Team) %>% 
+  summarise(across(`Clutch Failures`, sum),
+            .groups = 'drop')
+
+teams_rounds <- fourth %>% group_by(Team) %>% 
+  summarise(across(Rounds, sum),
+            .groups = 'drop')
+
+teams_kills <- fourth %>% group_by(Team) %>% 
+  summarise(across(Kills.y, sum),
+            .groups = 'drop')
+
+team_round_performance <- read_csv("C:/Users/brkea/Downloads/team_round_perfomance_december.csv")
+
+team1 <- left_join(teams_fb, teams_fd, by = "Team")
+team2 <- left_join(team1, teams_clutch_success, by = "Team")
+team3 <- left_join(team2, teams_clutch_fail, by = "Team")
+team4 <- left_join(team3, teams_rounds, by = "Team")
+teams <- left_join(team4, teams_kills, by = "Team")
+teams <- teams[-which(teams$Team=="KRÜ Esports (si)"),]
+teams <- left_join(teams, team_round_performance, by = "Team")
+
+teams$FBSR <- teams$Kills.x/(teams$Kills.x+teams$Deaths)
+teams$clutchPercentage <- teams$Clutches/(teams$`Clutch Failures`+teams$Clutches)
+teams$KPR <- teams$Kills.y/(teams$Rounds)
+teams$winPercentage <- teams$Wins/(teams$Wins+teams$Losses)
+
+teams$start <- 16
+teams$finish <- 16
+
+order.FBSR <- order(teams$FBSR, teams$Team)
+teams$FBSR_order[order.FBSR] <- 1:nrow(teams)
+teams$FBSR_order <- max(teams$FBSR_order) - teams$FBSR_order + 1
+
+order.clutchPercentage <- order(teams$clutchPercentage, teams$Team)
+teams$clutchPercentage_order[order.clutchPercentage] <- 1:nrow(teams)
+teams$clutchPercentage_order <- max(teams$clutchPercentage_order) - teams$clutchPercentage_order + 1
+
+order.KPR <- order(teams$KPR, teams$Team)
+teams$KPR_order[order.KPR] <- 1:nrow(teams)
+teams$KPR_order <- max(teams$KPR_order) - teams$KPR_order + 1
+
+order.winPercentage <- order(teams$winPercentage, teams$Team)
+teams$winPercentage_order[order.winPercentage] <- 1:nrow(teams)
+teams$winPercentage_order <- max(teams$winPercentage_order) - teams$winPercentage_order + 1
+teams$average <- (teams$FBSR_order + teams$KPR_order + teams$clutchPercentage_order) / 4
+
+rm(list=setdiff(ls(), "teams"))
+teams <- teams[, c("Team", "average", "winPercentage_order", "FBSR_order", "clutchPercentage_order", "KPR_order", "start", "finish")]
+
+```
+
+
+```{r}
+library(tidyr) # pivot_longer
+test <- tidyr::pivot_longer(teams, c(`start`, `FBSR_order`, `clutchPercentage_order`, `KPR_order`, `winPercentage_order`, `finish`), names_to = "year")
+ p <- ggplot(test, aes(year, value)) + geom_path(aes(color = Team, group = Team), linejoin = "round", linewidth = 1.5)+scale_x_discrete(limits = c("start", "FBSR_order", "clutchPercentage_order", "KPR_order", "winPercentage_order", "finish")) +
+  theme(legend.position = "none",
+        panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_rect(fill='transparent'),
+        plot.background = element_rect(fill='transparent', color=NA),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.background = element_rect(fill='transparent'),
+        legend.box.background = element_rect(fill='transparent')
+        ) + scale_y_reverse() + 
+        gghighlight(Team == "FNATIC" || Team == "DRX" || Team == "LOUD" || Team == "Evil Geniuses" || Team == "Sentinels", unhighlighted_params = list(linewidth = 0.2,  colour = ggplot2::alpha("dark gray", 0.75))) + 
+   scale_color_manual(values=c("#2f5ff7", "#0C1220", "#FF5900", "#0aff00", "#ce0037"))
+ 
+ ggsave('C:/Users/XXXXX/Downloads/test.png', p, bg='transparent', width = 12, height = 8, dpi = 900)
+ 
+ p
+```
+
